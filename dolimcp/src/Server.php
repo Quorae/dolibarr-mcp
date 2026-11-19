@@ -9,6 +9,7 @@ use DoliMcp\Dolibarr\Journal;
 use DoliMcp\Mcp\Tool;
 use DoliMcp\Mcp\ToolResult;
 use DoliMcp\Tools\ApiTools;
+use DoliMcp\Tools\ObjectTools;
 use DoliMcp\Mcp\Protocol;
 use DoliMcp\Mcp\ToolRegistry;
 use DoliMcp\Tools\CoreTools;
@@ -21,6 +22,7 @@ final class Server
         $registry = new ToolRegistry();
         CoreTools::register($registry, $context);
         ApiTools::register($registry, $context);
+        ObjectTools::register($registry, $context);
 
         return $registry;
     }
