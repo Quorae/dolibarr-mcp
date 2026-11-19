@@ -52,7 +52,7 @@ final class DocumentFiles
                 try {
                     $files = (array) $context->rest->request('GET', 'documents', ['modulepart' => self::modulepart($a), 'id' => (int) $a['id']]);
                 } catch (RestError $e) {
-                    if ($e->status === 404) { // Dolibarr answers 404 to an empty folder
+                    if ($e->isEmptyResult()) { // Dolibarr answers a JSON 404 to an empty folder
                         return ToolResult::ok([]);
                     }
                     throw $e;

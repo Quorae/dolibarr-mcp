@@ -36,7 +36,7 @@ final class SetupTools
     ];
     // Disabling these cuts the MCP off; they can only be re-enabled from Dolibarr's interface.
     private const PROTECTED_MODULES = ['DoliMcp', 'Api'];
-    private const PROTECTED_MESSAGE = 'The MCP depends on this module; to disable it, use Dolibarr (Setup > Modules).';
+    public const PROTECTED_MESSAGE = 'The MCP depends on this module; to disable it, use Dolibarr (Setup > Modules).';
     private const MAX_LOGO_BYTES = 5_000_000;
 
     public static function register(ToolRegistry $registry, Context $context): void

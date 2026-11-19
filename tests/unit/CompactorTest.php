@@ -60,4 +60,27 @@ final class CompactorTest extends TestCase
         $out = Compactor::compact(['constants' => [['name' => 'A_TOKEN', 'value' => 'x'], ['name' => 'A_LABEL', 'value' => 'y']]]);
         $this->assertSame([['name' => 'A_TOKEN', 'value' => '********'], ['name' => 'A_LABEL', 'value' => 'y']], $out['constants']);
     }
+
+    public function testThirdpartyWebservicesKeyIsMasked(): void
+    {
+        $this->assertSame(['webservices_key' => '********', 'id' => 1], Compactor::compact(['webservices_key' => 'abc', 'id' => 1]));
+    }
+
+    public function testExtraSecretFieldsAreMaskedWhenGiven(): void
+    {
+        Compactor::setExtraSecretFields(['options_testsecret']);
+        try {
+            $this->assertSame(['array_options' => ['options_testsecret' => '********', 'options_other' => 'x']], Compactor::compact(['array_options' => ['options_testsecret' => 's3cr3t', 'options_other' => 'x']]));
+        } finally {
+            Compactor::setExtraSecretFields([]);
+        }
+        $this->assertSame(['options_testsecret' => 's3cr3t'], Compactor::compact(['options_testsecret' => 's3cr3t']));
+    }
+
+    public function testDateKeyRule(): void
+    {
+        $this->assertTrue(Compactor::isDateKey('date_lim_reglement'));
+        $this->assertTrue(Compactor::isDateKey('date'));
+        $this->assertFalse(Compactor::isDateKey('label'));
+    }
 }

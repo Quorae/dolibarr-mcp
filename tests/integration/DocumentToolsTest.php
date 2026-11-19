@@ -273,4 +273,21 @@ final class DocumentToolsTest extends McpTestCase
 
         return json_decode((string) $raw, true) ?? [];
     }
+
+    public function testLargeFileAttachmentIsStillJournaled(): void
+    {
+        $tp = $this->thirdparty();
+        $id = $this->draftInvoice($tp);
+        try {
+            $r = $this->callTool('file_attach', ['type' => 'invoice', 'id' => $id, 'filename' => 'big.txt', 'content_base64' => base64_encode(str_repeat('0123456789abcdef', 6400))]);
+            $this->assertFalse($r['isError'], $r['text']);
+            $row = self::db()->query("SELECT params FROM llx_dolimcp_journal WHERE tool = 'file_attach' ORDER BY rowid DESC LIMIT 1")->fetch_assoc();
+            $this->assertNotNull($row, 'the journal row must exist');
+            $this->assertStringContainsString('big.txt', $row['params']);
+            $this->assertStringContainsString('bytes omitted', $row['params']);
+        } finally {
+            $this->rest('DELETE', "invoices/$id");
+            $this->rest('DELETE', "thirdparties/$tp");
+        }
+    }
 }

@@ -100,4 +100,36 @@ final class EndpointTest extends McpTestCase
             $this->assertStringStartsWith('application/json', $response['headers']['content-type'] ?? '');
         }
     }
+
+    public function testIpRestrictionAnswers403Json(): void
+    {
+        self::setConst('API_RESTRICT_ON_IP', '10.99.99.99');
+        try {
+            $response = $this->mcp(self::PING);
+            $this->assertSame(403, $response['status']);
+            $this->assertSame(-32004, $response['body']['error']['code']);
+        } finally {
+            self::db()->query("DELETE FROM llx_const WHERE name = 'API_RESTRICT_ON_IP'");
+        }
+        $this->assertSame(200, $this->mcp(self::PING)['status']);
+    }
+
+    public function testArrayApiKeyGets401Json(): void
+    {
+        $raw = file_get_contents(getenv('MCP_URL') . '?api_key[]=x', false, stream_context_create(['http' => [
+            'method' => 'POST', 'header' => "Content-Type: application/json\r\nAccept: application/json", 'content' => json_encode(self::PING), 'ignore_errors' => true,
+        ]]));
+        $this->assertStringContainsString('HTTP/1.1 401', implode("\n", http_get_last_response_headers()));
+        $this->assertSame(-32001, json_decode((string) $raw, true)['error']['code'] ?? null);
+    }
+
+    public function testKeyMatchedOnlyByCollationGets401Json(): void
+    {
+        $key = $this->apiKey();
+        $other = strtoupper($key) === $key ? strtolower($key) : strtoupper($key);
+        $this->assertNotSame($key, $other);
+        $response = $this->mcp(self::PING, [], $other);
+        $this->assertSame(401, $response['status']);
+        $this->assertSame(-32001, $response['body']['error']['code']);
+    }
 }

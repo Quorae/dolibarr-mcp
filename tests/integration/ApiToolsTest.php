@@ -81,4 +81,46 @@ final class ApiToolsTest extends McpTestCase
         $this->assertFalse($result['isError'] ?? false, json_encode($result));
         $this->assertSame('admin', $result['structuredContent']['login'] ?? null);
     }
+
+    public function testDisablingTheMcpOrApiModuleThroughRestPathsIsRefused(): void
+    {
+        foreach (['setup/modules/modDoliMcp/disable', '/Setup/Modules/modapi/disable/', 'setup/modules/modApi/disable?x=1'] as $path) {
+            $r = $this->callTool('api_request', ['method' => 'PUT', 'path' => $path]);
+            $this->assertTrue($r['isError'], $path);
+            $this->assertStringContainsString('use Dolibarr (Setup > Modules)', $r['text'], $path);
+        }
+        $this->assertSame(200, $this->rest('GET', 'setup/modules')['status']);
+    }
+
+    public function testAnHtmlNotFoundIsAnErrorNotAnEmptyList(): void
+    {
+        $original = self::db()->query("SELECT value FROM llx_const WHERE name = 'DOLIMCP_API_URL'")->fetch_row()[0] ?? null;
+        self::setConst('DOLIMCP_API_URL', 'http://dolibarr-app/no-such-dir/api/index.php');
+        try {
+            $r = $this->callTool('api_request', ['method' => 'GET', 'path' => 'thirdparties']);
+            $this->assertTrue($r['isError'], $r['text']);
+            $this->assertStringContainsString('404', $r['text']);
+        } finally {
+            self::db()->query("DELETE FROM llx_const WHERE name = 'DOLIMCP_API_URL'");
+            if ($original !== null) {
+                self::setConst('DOLIMCP_API_URL', $original);
+            }
+        }
+    }
+
+    public function testNonHttpApiUrlIsRefused(): void
+    {
+        $original = self::db()->query("SELECT value FROM llx_const WHERE name = 'DOLIMCP_API_URL'")->fetch_row()[0] ?? null;
+        self::setConst('DOLIMCP_API_URL', 'file:///etc/passwd');
+        try {
+            $r = $this->callTool('api_request', ['method' => 'GET', 'path' => 'thirdparties']);
+            $this->assertTrue($r['isError'], $r['text']);
+            $this->assertStringContainsString('DOLIMCP_API_URL', $r['text']);
+        } finally {
+            self::db()->query("DELETE FROM llx_const WHERE name = 'DOLIMCP_API_URL'");
+            if ($original !== null) {
+                self::setConst('DOLIMCP_API_URL', $original);
+            }
+        }
+    }
 }

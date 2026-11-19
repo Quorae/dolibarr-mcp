@@ -12,6 +12,21 @@ use DoliMcp\Http\Response;
 use DoliMcp\Server;
 
 ob_start();
+$GLOBALS['dolimcpSent'] = false;
+// A fatal error or an exit inside Dolibarr must still end in a JSON answer.
+register_shutdown_function(static function (): void {
+    if ($GLOBALS['dolimcpSent']) {
+        return;
+    }
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+    }
+    echo '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}';
+});
 @ini_set('display_errors', '0');
 
 foreach (['NOCSRFCHECK', 'NOTOKENRENEWAL', 'NOREQUIREMENU', 'NOREQUIREHTML', 'NOREQUIREAJAX', 'NOLOGIN', 'NOSESSION', 'NODEFAULTVALUES'] as $name) {
@@ -36,7 +51,10 @@ require_once __DIR__ . '/src/autoload.php';
 
 function dolimcpSend(Response $response): never
 {
-    ob_end_clean();
+    $GLOBALS['dolimcpSent'] = true;
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
     http_response_code($response->status);
     foreach ($response->headers as $name => $value) {
         header("$name: $value");
@@ -60,10 +78,21 @@ spl_autoload_register(Luracast\Restler\AutoLoader::instance());
 require_once DOL_DOCUMENT_ROOT . '/api/class/api.class.php';
 require_once DOL_DOCUMENT_ROOT . '/api/class/api_access.class.php';
 
+// The two safeguards api/index.php applies before authenticating.
+if (!isModEnabled('api')) {
+    dolimcpError(503, -32003, 'The REST API module is not enabled');
+}
+if (getDolGlobalString('API_RESTRICT_ON_IP') && !in_array(getUserRemoteIP(), explode(' ', getDolGlobalString('API_RESTRICT_ON_IP')), true)) {
+    dolimcpError(403, -32004, 'API not allowed from your IP');
+}
+
 try {
-    (new DolibarrApiAccess())->__isAllowed();
-} catch (Luracast\Restler\RestException $e) {
-    dolimcpError(401, -32001, $e->getMessage());
+    $allowed = (new DolibarrApiAccess())->__isAllowed();
+} catch (Throwable $e) {
+    dolimcpError(401, -32001, $e instanceof Luracast\Restler\RestException ? $e->getMessage() : 'Unauthorized');
+}
+if ($allowed !== true || !(DolibarrApiAccess::$user instanceof User)) {
+    dolimcpError(401, -32001, 'Unauthorized');
 }
 
 if (!isModEnabled('dolimcp')) {

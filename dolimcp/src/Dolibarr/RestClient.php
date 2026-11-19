@@ -11,7 +11,7 @@ final class RestClient
 {
     private const TIMEOUT = 30;
 
-    /** @param ?\Closure(string,string,list<string>,?string):array{status:int,body:string} $transport */
+    /** @param ?\Closure(string,string,list<string>,?string):array{status:int,body:string,headers?:array<string,string>} $transport */
     public function __construct(
         private readonly string $baseUrl,
         private readonly string $apiKey,
@@ -36,13 +36,17 @@ final class RestClient
         $decoded = $response['body'] === '' ? null : json_decode($response['body'], true);
         $invalidJson = $response['body'] !== '' && json_last_error() !== JSON_ERROR_NONE;
 
-        if ($response['status'] >= 400) {
+        if ($response['status'] < 200 || $response['status'] > 299) {
             $message = is_array($decoded) ? ($decoded['error']['message'] ?? null) : null;
-            if (!is_string($message)) {
+            $location = $response['headers']['location'] ?? null;
+            if ($response['status'] >= 300 && $response['status'] < 400) {
+                $message = 'Dolibarr answered HTTP ' . $response['status'] . ' (a redirect)' . ($location === null ? '' : ' to ' . $location)
+                    . ': the internal REST call must not be redirected. Set DOLIMCP_API_URL to the final URL of the Dolibarr REST API (e.g. https://your-host/api/index.php).';
+            } elseif (!is_string($message)) {
                 $excerpt = self::excerpt($response['body']);
                 $message = 'Dolibarr answered HTTP ' . $response['status'] . ($excerpt === '' ? '' : ': ' . $excerpt);
             }
-            throw new RestError($message, $response['status']);
+            throw new RestError($message, $response['status'], $response['status'] === 404 && is_array($decoded) && ($decoded['error']['code'] ?? null) === 404);
         }
         if ($invalidJson) {
             throw new RestError('Dolibarr returned a non-JSON answer: ' . self::excerpt($response['body']), $response['status']);
@@ -51,7 +55,7 @@ final class RestClient
         return $decoded;
     }
 
-    /** @return array{status:int,body:string} */
+    /** @return array{status:int,body:string,headers:array<string,string>} */
     private static function send(string $method, string $url, array $headers, ?string $body): array
     {
         $curl = curl_init($url);
@@ -61,6 +65,12 @@ final class RestClient
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => self::TIMEOUT,
         ]);
+        // http(s) only, whatever DOLIMCP_API_URL holds.
+        if (defined('CURLOPT_PROTOCOLS_STR')) {
+            curl_setopt_array($curl, [CURLOPT_PROTOCOLS_STR => 'http,https', CURLOPT_REDIR_PROTOCOLS_STR => 'http,https']);
+        } else {
+            curl_setopt_array($curl, [CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS]);
+        }
         if ($body !== null) {
             curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         }
@@ -70,7 +80,9 @@ final class RestClient
             throw new ToolError(self::failureMessage(curl_errno($curl), curl_error($curl)));
         }
 
-        return ['status' => $status, 'body' => $raw];
+        $redirect = curl_getinfo($curl, CURLINFO_REDIRECT_URL);
+
+        return ['status' => $status, 'body' => $raw, 'headers' => is_string($redirect) && $redirect !== '' ? ['location' => $redirect] : []];
     }
 
     public static function failureMessage(int $errno, string $error): string

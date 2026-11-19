@@ -48,7 +48,7 @@ final class ApiTools
 
         $registry->add(new Tool(
             'api_request',
-            'Call the Dolibarr REST API as the authenticated user (path relative to the API root, e.g. "thirdparties" or "invoices/12/validate"). Use api_endpoints to find paths.',
+            'Call the Dolibarr REST API as the authenticated user (path relative to the API root, e.g. "thirdparties" or "invoices/12/validate"). Use api_endpoints to find paths. A GET that returns [] may mean no result, or a wrong path: check it with api_endpoints.',
             [
                 'type' => 'object',
                 'properties' => [
@@ -66,11 +66,16 @@ final class ApiTools
                 if (str_contains($path, '..') || str_contains($path, '://')) {
                     throw new ToolError('Invalid path: it must be relative to the API root');
                 }
+                // Same refusal as module_set: the guard must hold whichever tool reaches the REST API.
+                $normalized = strtolower(trim((string) preg_replace('#/+#', '/', rawurldecode((string) strtok($path, '?'))), '/'));
+                if (preg_match('#^setup/modules/(mod)?(api|dolimcp)/disable$#', $normalized) === 1) {
+                    throw new ToolError(SetupTools::PROTECTED_MESSAGE);
+                }
 
                 try {
                     $data = $context->rest->request($method, $path, (array) ($arguments['query'] ?? []), isset($arguments['body']) ? (array) $arguments['body'] : null);
                 } catch (RestError $e) {
-                    if ($method === 'GET' && $e->status === 404) {
+                    if ($method === 'GET' && $e->isEmptyResult()) {
                         return ToolResult::ok([]);
                     }
                     throw $e;

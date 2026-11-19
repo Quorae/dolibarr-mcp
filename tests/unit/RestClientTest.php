@@ -58,4 +58,37 @@ final class RestClientTest extends TestCase
         $this->assertStringContainsString('timed out after 30 s', RestClient::failureMessage(CURLE_OPERATION_TIMEDOUT, 'Operation timed out'));
         $this->assertStringContainsString('Connection refused', RestClient::failureMessage(CURLE_COULDNT_CONNECT, 'Connection refused'));
     }
+
+    public function testRedirectIsAnErrorThatNamesTheLocationAndTheSetting(): void
+    {
+        $client = new RestClient('http://x', 'k', static fn (): array => ['status' => 302, 'body' => '', 'headers' => ['location' => 'https://x/api']]);
+        try {
+            $client->request('PUT', 'invoices/1');
+            $this->fail('RestError expected');
+        } catch (RestError $e) {
+            $this->assertSame(302, $e->status);
+            $this->assertStringContainsString('https://x/api', $e->getMessage());
+            $this->assertStringContainsString('DOLIMCP_API_URL', $e->getMessage());
+        }
+    }
+
+    public function testStatusOutside2xxIsAlwaysAnError(): void
+    {
+        $this->expectException(RestError::class);
+        (new RestClient('http://x', 'k', static fn (): array => ['status' => 100, 'body' => '']))->request('GET', 'users');
+    }
+
+    public function testOnlyADolibarrJsonNotFoundMeansAnEmptyList(): void
+    {
+        $json = new RestClient('http://x', 'k', static fn (): array => ['status' => 404, 'body' => '{"error":{"code":404,"message":"Not Found: No thirdparties found"}}']);
+        $html = new RestClient('http://x', 'k', static fn (): array => ['status' => 404, 'body' => '<h1>Not Found</h1>']);
+        foreach ([[$json, true], [$html, false]] as [$client, $empty]) {
+            try {
+                $client->request('GET', 'thirdparties');
+                $this->fail('RestError expected');
+            } catch (RestError $e) {
+                $this->assertSame($empty, $e->isEmptyResult());
+            }
+        }
+    }
 }

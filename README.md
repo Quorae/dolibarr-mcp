@@ -11,7 +11,7 @@ Licence: GPL-3.0-or-later.
 
 ## Requirements
 
-- Dolibarr 24.0 or later, with the REST API module enabled.
+- Tested with Dolibarr 24.0.2; requires Dolibarr 24.0 or later, with the REST API module enabled.
 - PHP 8.1 or later.
 
 ## Installation

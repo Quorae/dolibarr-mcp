@@ -12,13 +12,22 @@ final class Compactor
     // Constant names (uppercase): the dolibarr_set_const() regex plus what isASecretKey() adds (p12key, secretN, _PW_*).
     private const SECRET_CONSTANT_REGEX = '/(_KEY|_EXPORTKEY|SECUREKEY|SERVERKEY|P12KEY|_PASS|PASSWORD|_PW|_PW_[A-Z]+|SECRET\d?|_TOKEN|TOKEN|_REFRESH)$/';
     // Object field names (lowercase): fixed list, so that fields such as import_key stay visible.
-    private const SECRET_FIELDS = ['pass', 'password', 'pass_crypted', 'pass_indatabase', 'pass_indatabase_crypted', 'pass_temp', 'api_key', 'token'];
+    private const SECRET_FIELDS = ['pass', 'password', 'pass_crypted', 'pass_indatabase', 'pass_indatabase_crypted', 'pass_temp', 'api_key', 'token', 'webservices_key'];
+    /** Custom field names (options_<name>) of type password, set once per request by the Context. @var list<string> */
+    private static array $extraSecretFields = [];
+
     private const DATE_KEYS = ['date', 'datec', 'datem', 'datep', 'datef', 'tms'];
+
+    /** @param list<string> $names */
+    public static function setExtraSecretFields(array $names): void
+    {
+        self::$extraSecretFields = $names;
+    }
 
     /** A field name (lowercase list) or an uppercase constant name. */
     public static function isSecretName(string $name): bool
     {
-        return in_array($name, self::SECRET_FIELDS, true) || ($name === strtoupper($name) && self::isSecretConstant($name));
+        return in_array($name, self::SECRET_FIELDS, true) || in_array($name, self::$extraSecretFields, true) || ($name === strtoupper($name) && self::isSecretConstant($name));
     }
 
     /** A Dolibarr constant name, in any case (Dolibarr itself matches case-insensitively). */
@@ -52,7 +61,7 @@ final class Compactor
         return array_is_list($data) ? array_values($out) : $out;
     }
 
-    private static function isDateKey(string $key): bool
+    public static function isDateKey(string $key): bool
     {
         return in_array($key, self::DATE_KEYS, true) || str_starts_with($key, 'date_') || str_ends_with($key, '_date');
     }
