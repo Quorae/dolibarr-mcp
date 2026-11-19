@@ -37,4 +37,25 @@ final class RestClientTest extends TestCase
             $this->assertSame('Unauthorized: Invalid login', $e->getMessage());
         }
     }
+
+    public function testNonJsonSuccessBodyIsAnError(): void
+    {
+        $client = new RestClient('http://x', 'k', static fn (): array => ['status' => 200, 'body' => '<html><b>PHP Fatal error</b> in x.php</html>']);
+        $this->expectException(RestError::class);
+        $this->expectExceptionMessage('non-JSON answer: PHP Fatal error in x.php');
+        $client->request('GET', 'users');
+    }
+
+    public function testErrorStatusWithoutDolibarrMessageShowsAnExcerpt(): void
+    {
+        $client = new RestClient('http://x', 'k', static fn (): array => ['status' => 502, 'body' => '<h1>Bad Gateway</h1>']);
+        $this->expectExceptionMessage('Dolibarr answered HTTP 502: Bad Gateway');
+        $client->request('GET', 'users');
+    }
+
+    public function testFailureMessageNamesTimeoutAndCurlError(): void
+    {
+        $this->assertStringContainsString('timed out after 30 s', RestClient::failureMessage(CURLE_OPERATION_TIMEDOUT, 'Operation timed out'));
+        $this->assertStringContainsString('Connection refused', RestClient::failureMessage(CURLE_COULDNT_CONNECT, 'Connection refused'));
+    }
 }

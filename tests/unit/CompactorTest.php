@@ -42,4 +42,22 @@ final class CompactorTest extends TestCase
         $this->assertTrue(Compactor::isSecretName('STRIPE_KEY_PROD'));
         $this->assertFalse(Compactor::isSecretName('MAIN_MAIL_SMTPS_ID'));
     }
+
+    public function testFieldsAreMaskedFromTheFixedListOnly(): void
+    {
+        $this->assertSame(['import_key' => 'x', 'pass_temp' => '********', 'pass' => '********'], Compactor::compact(['import_key' => 'x', 'pass_temp' => 't', 'pass' => 'p']));
+    }
+
+    public function testUppercaseConstantNamesAreMasked(): void
+    {
+        $this->assertSame(['MAIN_MAIL_SMTPS_PW' => '********'], Compactor::compact(['MAIN_MAIL_SMTPS_PW' => 'x']));
+        $this->assertTrue(Compactor::isSecretConstant('main_mail_smtps_pw'));
+        $this->assertTrue(Compactor::isSecretConstant('SOME_SECRET2'));
+    }
+
+    public function testNestedConstantListIsMasked(): void
+    {
+        $out = Compactor::compact(['constants' => [['name' => 'A_TOKEN', 'value' => 'x'], ['name' => 'A_LABEL', 'value' => 'y']]]);
+        $this->assertSame([['name' => 'A_TOKEN', 'value' => '********'], ['name' => 'A_LABEL', 'value' => 'y']], $out['constants']);
+    }
 }

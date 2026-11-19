@@ -34,10 +34,18 @@ final class RestClient
 
         $response = ($this->transport ?? self::send(...))(strtoupper($method), $url, $headers, $payload);
         $decoded = $response['body'] === '' ? null : json_decode($response['body'], true);
+        $invalidJson = $response['body'] !== '' && json_last_error() !== JSON_ERROR_NONE;
 
         if ($response['status'] >= 400) {
             $message = is_array($decoded) ? ($decoded['error']['message'] ?? null) : null;
-            throw new RestError(is_string($message) ? $message : 'Dolibarr answered HTTP ' . $response['status'], $response['status']);
+            if (!is_string($message)) {
+                $excerpt = self::excerpt($response['body']);
+                $message = 'Dolibarr answered HTTP ' . $response['status'] . ($excerpt === '' ? '' : ': ' . $excerpt);
+            }
+            throw new RestError($message, $response['status']);
+        }
+        if ($invalidJson) {
+            throw new RestError('Dolibarr returned a non-JSON answer: ' . self::excerpt($response['body']), $response['status']);
         }
 
         return $decoded;
@@ -58,11 +66,22 @@ final class RestClient
         }
         $raw = curl_exec($curl);
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
         if (!is_string($raw)) {
-            throw new ToolError('The Dolibarr REST API could not be reached');
+            throw new ToolError(self::failureMessage(curl_errno($curl), curl_error($curl)));
         }
 
         return ['status' => $status, 'body' => $raw];
+    }
+
+    public static function failureMessage(int $errno, string $error): string
+    {
+        $reason = $errno === CURLE_OPERATION_TIMEDOUT ? 'the request timed out after ' . self::TIMEOUT . ' s' : $error;
+
+        return 'The Dolibarr REST API could not be reached: ' . $reason;
+    }
+
+    private static function excerpt(string $body): string
+    {
+        return mb_substr(trim((string) preg_replace('/\s+/', ' ', strip_tags($body))), 0, 200);
     }
 }

@@ -32,9 +32,7 @@ final class ApiToolsTest extends McpTestCase
         $id = (int) $this->rest('GET', 'users/info')['body']['id'];
         $r = $this->callTool('api_request', ['method' => 'GET', 'path' => 'users/' . $id]);
         $this->assertFalse($r['isError'], $r['text']);
-        $this->assertStringNotContainsString(self::apiKey(), $r['text']);
-        // Dolibarr already drops the key here; whatever stays must be masked.
-        $this->assertContains($r['data']['api_key'] ?? '********', ['********']);
+        $this->assertStringNotContainsString(self::apiKey(), $r['text'] . json_encode($r['content']));
     }
 
     public function testEndpointsSearchFindsInvoicesValidate(): void
@@ -45,12 +43,30 @@ final class ApiToolsTest extends McpTestCase
         $this->assertContains('/invoices/{id}/validate', array_column($r['data'], 'path'));
     }
 
-    public function testSecretConstantIsMasked(): void
+    public function testSecretConstantIsNeverReturned(): void
     {
         self::db()->query("DELETE FROM llx_const WHERE name = 'MAIN_MAIL_SMTPS_PW_TEST'");
         self::db()->query("INSERT INTO llx_const (name, entity, value, type, visible) VALUES ('MAIN_MAIL_SMTPS_PW_TEST', 1, 'hunter2-secret', 'chaine', 0)");
-        $r = $this->callTool('api_request', ['method' => 'GET', 'path' => 'setup/conf/MAIN_MAIL_SMTPS_PW_TEST']);
+        try {
+            $r = $this->callTool('api_request', ['method' => 'GET', 'path' => 'setup/conf/MAIN_MAIL_SMTPS_PW_TEST']);
+        } finally {
+            self::db()->query("DELETE FROM llx_const WHERE name = 'MAIN_MAIL_SMTPS_PW_TEST'");
+        }
+        // Dolibarr refuses secret constants itself (403); the MASK branch is covered by ApiToolsMaskTest.
+        $this->assertTrue($r['isError']);
         $this->assertStringNotContainsString('hunter2-secret', $r['text']);
+    }
+
+    public function testJournalMasksSecretsInParams(): void
+    {
+        $this->callTool('api_request', ['method' => 'POST', 'path' => 'thirdparties', 'body' => [
+            'name' => 'Journal secrets ' . bin2hex(random_bytes(4)),
+            'password' => 'topsecretvalue', 'pass' => 'topsecretvalue', 'api_key' => 'topsecretvalue',
+            'constants' => [['name' => 'X_PW', 'value' => 'topsecretvalue']],
+        ]]);
+        $row = self::db()->query("SELECT params FROM llx_dolimcp_journal WHERE tool = 'api_request' ORDER BY rowid DESC LIMIT 1")->fetch_assoc();
+        $this->assertStringContainsString('********', $row['params']);
+        $this->assertStringNotContainsString('topsecretvalue', $row['params']);
     }
 
     public function testContextKeyIsTheAuthenticatedOneWhenApiKeyParamIsEmpty(): void

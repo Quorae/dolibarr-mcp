@@ -76,14 +76,19 @@ final class ApiTools
                     throw $e;
                 }
 
-                // setup/conf/<name> answers with a bare value: its name is only in the path.
-                if (is_string($data) && preg_match('#^setup/conf/([^/?]+)#', $path, $m) && Compactor::isSecretName(urldecode($m[1]))) {
-                    return ToolResult::ok(Compactor::MASK);
-                }
-
-                return ToolResult::ok(Compactor::compact($data));
+                return ToolResult::ok(self::mask($path, Compactor::compact($data)));
             },
             true,
         ));
+    }
+
+    /** setup/conf/<name> answers with a bare value: its name is only in the path. */
+    public static function mask(string $path, mixed $data): mixed
+    {
+        if (is_string($data) && preg_match('#^setup/conf/([^/?]+)#', $path, $m) && Compactor::isSecretConstant(urldecode($m[1]))) {
+            return Compactor::MASK;
+        }
+
+        return $data;
     }
 }

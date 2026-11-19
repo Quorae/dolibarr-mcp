@@ -9,16 +9,22 @@ final class Compactor
 {
     public const MASK = '********';
 
-    // Same regex as dolibarr_set_const(); the extra names are the user/API credential fields.
-    private const SECRET_REGEX = '/(_KEY|_EXPORTKEY|_SECUREKEY|_SERVERKEY|_PASS|_PASSWORD|_PW|_PW_TICKET|_PW_EMAILING|_SECRET|_TOKEN|_REFRESH)$/';
-    private const SECRET_NAMES = ['pass', 'password', 'pass_crypted', 'pass_indatabase', 'pass_indatabase_crypted', 'api_key', 'token'];
+    // Constant names (uppercase): the dolibarr_set_const() regex plus what isASecretKey() adds (p12key, secretN, _PW_*).
+    private const SECRET_CONSTANT_REGEX = '/(_KEY|_EXPORTKEY|SECUREKEY|SERVERKEY|P12KEY|_PASS|PASSWORD|_PW|_PW_[A-Z]+|SECRET\d?|_TOKEN|TOKEN|_REFRESH)$/';
+    // Object field names (lowercase): fixed list, so that fields such as import_key stay visible.
+    private const SECRET_FIELDS = ['pass', 'password', 'pass_crypted', 'pass_indatabase', 'pass_indatabase_crypted', 'pass_temp', 'api_key', 'token'];
     private const DATE_KEYS = ['date', 'datec', 'datem', 'datep', 'datef', 'tms'];
 
+    /** A field name (lowercase list) or an uppercase constant name. */
     public static function isSecretName(string $name): bool
     {
-        $name = strtoupper(preg_replace('/(_TEST|_PROD)$/i', '', $name) ?? $name);
+        return in_array($name, self::SECRET_FIELDS, true) || ($name === strtoupper($name) && self::isSecretConstant($name));
+    }
 
-        return in_array(strtolower($name), self::SECRET_NAMES, true) || preg_match(self::SECRET_REGEX, $name) === 1;
+    /** A Dolibarr constant name, in any case (Dolibarr itself matches case-insensitively). */
+    public static function isSecretConstant(string $name): bool
+    {
+        return preg_match(self::SECRET_CONSTANT_REGEX, strtoupper((string) preg_replace('/(_TEST|_PROD)$/i', '', $name))) === 1;
     }
 
     public static function compact(mixed $data): mixed
@@ -27,7 +33,7 @@ final class Compactor
             return $data;
         }
 
-        $maskValue = isset($data['name'], $data['value']) && is_string($data['name']) && self::isSecretName($data['name']);
+        $maskValue = isset($data['name'], $data['value']) && is_string($data['name']) && self::isSecretConstant($data['name']);
         $out = [];
         foreach ($data as $key => $value) {
             if (is_string($key) && ($maskValue && $key === 'value' || self::isSecretName($key)) && $value !== null && $value !== '') {
