@@ -49,7 +49,7 @@ class modDoliMcp extends DolibarrModules
 		$this->description = 'DoliMcpDescription';
 		$this->descriptionlong = 'DoliMcpDescription';
 		$this->editor_name = 'Dolibarr MCP contributors';
-		$this->editor_url = 'https://github.com/dolibarr-mcp/dolibarr-mcp';
+		$this->editor_url = 'https://github.com/Quorae/dolibarr-mcp';
 
 		// Single source of truth for the module version.
 		$this->version = '0.1.0';

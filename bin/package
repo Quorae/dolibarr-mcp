@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Usage: bin/package <version>
+# Builds dist/module_dolimcp-<version>.zip, the archive format Dolibarr's external module installer expects.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+version="${1:-}"
+if [ -z "$version" ]; then
+  echo "Usage: bin/package <version>" >&2
+  exit 2
+fi
+
+declared="$(sed -n "s/.*\$this->version = '\([^']*\)'.*/\1/p" dolimcp/core/modules/modDoliMcp.class.php)"
+if [ "$version" != "$declared" ]; then
+  echo "Version $version differs from the module descriptor version ($declared)." >&2
+  exit 1
+fi
+
+mkdir -p dist
+archive="dist/module_dolimcp-$version.zip"
+rm -f "$archive"
+zip -qr "$archive" dolimcp -x '*.DS_Store'
+echo "$archive"
