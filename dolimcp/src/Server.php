@@ -9,6 +9,9 @@ use DoliMcp\Dolibarr\Journal;
 use DoliMcp\Mcp\Tool;
 use DoliMcp\Mcp\ToolResult;
 use DoliMcp\Tools\ApiTools;
+use DoliMcp\Tools\DocumentFiles;
+use DoliMcp\Tools\DocumentMail;
+use DoliMcp\Tools\DocumentTools;
 use DoliMcp\Tools\ObjectTools;
 use DoliMcp\Mcp\Protocol;
 use DoliMcp\Mcp\ToolRegistry;
@@ -23,6 +26,9 @@ final class Server
         CoreTools::register($registry, $context);
         ApiTools::register($registry, $context);
         ObjectTools::register($registry, $context);
+        DocumentTools::register($registry, $context);
+        DocumentFiles::register($registry, $context);
+        DocumentMail::register($registry, $context);
 
         return $registry;
     }

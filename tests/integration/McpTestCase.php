@@ -44,6 +44,15 @@ abstract class McpTestCase extends TestCase
         return self::$apiKey;
     }
 
+    /** Writes a Dolibarr constant the way dolibarr_set_const does (delete then insert, entity 1). */
+    protected static function setConst(string $name, string $value): void
+    {
+        $name = self::db()->real_escape_string($name);
+        $value = self::db()->real_escape_string($value);
+        self::db()->query("DELETE FROM llx_const WHERE name = '$name' AND entity = 1");
+        self::db()->query("INSERT INTO llx_const (name, entity, value, type, visible) VALUES ('$name', 1, '$value', 'chaine', 0)");
+    }
+
     protected static function db(): \mysqli
     {
         return self::$db ??= new \mysqli(
