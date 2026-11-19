@@ -80,11 +80,14 @@ final class DocumentMail
         $object->fetch_thirdparty();
         $thirdparty = $object->thirdparty;
 
-        $to = trim((string) ($a['to'] ?? '')) ?: (string) ($thirdparty->email ?? '');
+        $to = self::addresses((string) ($a['to'] ?? '') ?: (string) ($thirdparty->email ?? ''), 'to');
         if ($to === '') {
             throw new ToolError('No recipient: pass "to" or fill in the email of the third party.');
         }
-        $cc = trim((string) ($a['cc'] ?? ''));
+        $cc = self::addresses((string) ($a['cc'] ?? ''), 'cc');
+        if (preg_match('/[\r\n]/', (string) ($a['subject'] ?? '')) === 1) {
+            throw new ToolError('The subject must be a single line.');
+        }
         $bcc = getDolGlobalString($setup['autocopy']);
 
         $from = getDolGlobalString('MAIN_MAIL_EMAIL_FROM') ?: (string) $user->email ?: getDolGlobalString('MAIN_INFO_SOCIETE_MAIL');
@@ -177,6 +180,9 @@ final class DocumentMail
             $subject = $subject !== '' ? $subject : (trim((string) ($template->topic ?? '')) ?: $langs->transnoentities($setup['subject'], '__REF__'));
             $message = $message !== '' ? $message : trim((string) ($template->content ?? ''));
         }
+        if (trim($message) === '') {
+            $message = 'Please find attached ' . ($object->element === 'propal' ? 'proposal' : 'invoice') . ' __REF__.';
+        }
 
         $substitutions = getCommonSubstitutionArray($langs, 0, null, $object);
         $substitutions['__SENDEREMAIL_SIGNATURE__'] = $context->user->signature;
@@ -184,6 +190,20 @@ final class DocumentMail
         complete_substitutions_array($substitutions, $langs, $object, ['mode' => 'formemail']);
 
         return [make_substitutions($subject, $substitutions), make_substitutions($message, $substitutions)];
+    }
+
+    /** Validates a comma-separated address list; the result is safe to put in a mail header. */
+    private static function addresses(string $list, string $field): string
+    {
+        $valid = [];
+        foreach (array_filter(array_map('trim', explode(',', $list)), static fn (string $address): bool => $address !== '') as $address) {
+            if (!isValidEmail($address)) {
+                throw new ToolError("\"$address\" is not a valid email address ($field).");
+            }
+            $valid[] = $address;
+        }
+
+        return implode(',', $valid);
     }
 
     private static function plain(string $error, array $errors, string $fallback): string

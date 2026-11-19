@@ -25,14 +25,14 @@ final class DocumentTools
     // Line fields copied from a proposal to the invoice created from it.
     private const LINE_FIELDS = [
         'fk_product', 'product_type', 'desc', 'label', 'qty', 'subprice', 'tva_tx', 'localtax1_tx', 'localtax2_tx',
-        'remise_percent', 'fk_unit', 'date_start', 'date_end', 'special_code', 'rang', 'info_bits',
+        'remise_percent', 'multicurrency_subprice', 'fk_unit', 'date_start', 'date_end', 'special_code', 'rang', 'info_bits',
     ];
 
     public static function register(ToolRegistry $registry, Context $context): void
     {
         $registry->add(new Tool(
             'document_action',
-            'Run a lifecycle action on a proposal or an invoice and return it. Proposal: validate, set_draft, close_signed, close_unsigned (note = reason), set_invoiced, create_invoice (draft invoice with the same third party, project, lines, payment terms and mode, linked to the proposal). Invoice: validate, set_draft, set_paid (close_code and note when paying less than the total), set_unpaid, cancel (close_code defaults to "abandon"; only for a validated invoice with no payment).',
+            'Run a lifecycle action on a proposal or an invoice and return it. Proposal: validate, set_draft, close_signed, close_unsigned (note = reason), set_invoiced, create_invoice (draft invoice with the same third party, project, customer reference, bank account, currency and rate, lines (VAT, discount), payment terms and mode, linked to the proposal; the converted amounts are recomputed by Dolibarr, and extra fields and the other data of the proposal are not copied). Invoice: validate, set_draft, set_paid (close_code and note when paying less than the total), set_unpaid, cancel (close_code defaults to "abandon"; only for a validated invoice with no payment).',
             [
                 'type' => 'object',
                 'properties' => [
@@ -120,7 +120,7 @@ final class DocumentTools
     {
         $proposal = (array) $context->rest->request('GET', "proposals/$proposalId");
         $fields = ['socid' => $proposal['socid'], 'date' => time(), 'type' => 0];
-        foreach (['fk_project', 'cond_reglement_id', 'mode_reglement_id', 'note_public', 'note_private'] as $key) {
+        foreach (['fk_project', 'cond_reglement_id', 'mode_reglement_id', 'note_public', 'note_private', 'ref_client', 'fk_account', 'multicurrency_code', 'multicurrency_tx'] as $key) {
             if (!empty($proposal[$key])) {
                 $fields[$key] = $proposal[$key];
             }
@@ -134,9 +134,14 @@ final class DocumentTools
         );
 
         $invoiceId = ObjectTypes::createdId('invoice', $context->rest->request('POST', 'invoices', [], $fields));
-        $context->rest->request('POST', 'objectlinks', [], [
-            'fk_source' => $proposalId, 'sourcetype' => 'propal', 'fk_target' => $invoiceId, 'targettype' => 'facture',
-        ]);
+        try {
+            $context->rest->request('POST', 'objectlinks', [], [
+                'fk_source' => $proposalId, 'sourcetype' => 'propal', 'fk_target' => $invoiceId, 'targettype' => 'facture',
+            ]);
+        } catch (ToolError $e) {
+            $ref = (string) (((array) $context->rest->request('GET', "invoices/$invoiceId"))['ref'] ?? '');
+            throw new ToolError("The draft invoice $invoiceId ($ref) was created from proposal $proposalId, but linking it to the proposal failed: " . $e->getMessage() . '. The invoice is valid; only the link is missing.');
+        }
 
         return (array) $context->rest->request('GET', "invoices/$invoiceId");
     }

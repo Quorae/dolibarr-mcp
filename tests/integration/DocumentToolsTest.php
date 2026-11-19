@@ -41,9 +41,9 @@ final class DocumentToolsTest extends McpTestCase
         return (int) $r['data']['id'];
     }
 
-    private function draftProposal(int $thirdpartyId): int
+    private function draftProposal(int $thirdpartyId, array $more = []): int
     {
-        $r = $this->callTool('object_create', ['type' => 'proposal', 'fields' => [
+        $r = $this->callTool('object_create', ['type' => 'proposal', 'fields' => $more + [
             'socid' => $thirdpartyId,
             'date' => time(),
             'duree_validite' => 30,
@@ -115,6 +115,7 @@ final class DocumentToolsTest extends McpTestCase
         try {
             $r = $this->action('invoice', $id, 'validate');
             $this->assertTrue($r['isError']);
+            $this->assertGreaterThan(10, strlen(trim($r['text'])));
             $this->assertStringNotContainsString('Internal error', $r['text']);
             $this->assertStringNotContainsStringIgnoringCase('<html', $r['text']);
             $this->assertStringNotContainsString('Stack trace', $r['text']);
@@ -191,7 +192,10 @@ final class DocumentToolsTest extends McpTestCase
         $search = $this->mailpit('search?query=' . urlencode("to:$address"));
         $this->assertSame(1, $search['messages_count'] ?? 0, json_encode($search));
         $message = $this->mailpit('message/' . $search['messages'][0]['ID']);
-        $this->assertNotEmpty($message['Subject']);
+        $ref = (string) $this->rest('GET', "proposals/$id")['body']['ref'];
+        $this->assertStringContainsString($ref, $message['Subject']);
+        $this->assertGreaterThan(3, strlen(trim($message['Text'])));
+        $this->assertStringContainsString($ref, $message['Text']);
         $this->assertCount(1, $message['Attachments']);
         $this->assertStringEndsWith('.pdf', $message['Attachments'][0]['FileName']);
 
@@ -199,6 +203,68 @@ final class DocumentToolsTest extends McpTestCase
         $this->assertSame(200, $events['status'], json_encode($events['body']));
         $this->assertNotEmpty($events['body']);
         $this->assertContains('AC_PROPAL_SENTBYMAIL', array_column($events['body'], 'code'));
+    }
+
+
+    public function testInvoiceFromProposalKeepsProjectTermsAndLines(): void
+    {
+        $tp = $this->thirdparty();
+        $project = $this->rest('POST', 'projects', ['ref' => 'DOC' . bin2hex(random_bytes(3)), 'title' => 'Docs project', 'socid' => $tp]);
+        $this->assertSame(200, $project['status'], json_encode($project['body']));
+        $proposalId = $this->draftProposal($tp, [
+            'socid' => $tp, 'date' => time(), 'duree_validite' => 30,
+            'fk_project' => (int) $project['body'], 'cond_reglement_id' => 2, 'mode_reglement_id' => 2, 'ref_client' => 'PO-4242',
+            'lines' => [['desc' => 'Discounted', 'qty' => 2, 'subprice' => 50, 'tva_tx' => 5.5, 'remise_percent' => 10]],
+        ]);
+        $this->assertFalse($this->action('proposal', $proposalId, 'validate')['isError']);
+        $created = $this->action('proposal', $proposalId, 'create_invoice');
+        $this->assertFalse($created['isError'], $created['text']);
+        $invoice = $this->rest('GET', 'invoices/' . (int) $created['data']['id'])['body'];
+        $this->assertSame((int) $project['body'], (int) $invoice['fk_project']);
+        $this->assertSame(2, (int) $invoice['cond_reglement_id']);
+        $this->assertSame(2, (int) $invoice['mode_reglement_id']);
+        $this->assertSame('PO-4242', $invoice['ref_client']);
+        $this->assertCount(1, $invoice['lines']);
+        $this->assertEquals(5.5, $invoice['lines'][0]['tva_tx']);
+        $this->assertEquals(10, $invoice['lines'][0]['remise_percent']);
+        $this->assertEquals(90, $invoice['total_ht']);
+        $this->rest('DELETE', 'invoices/' . (int) $created['data']['id']);
+    }
+
+    public function testSendHonoursToCcAndSubject(): void
+    {
+        $stamp = bin2hex(random_bytes(4));
+        $tp = $this->thirdparty("default-$stamp@example.com");
+        $id = $this->draftProposal($tp);
+        $this->assertFalse($this->action('proposal', $id, 'validate')['isError']);
+
+        $sent = $this->callTool('document_send', ['type' => 'proposal', 'id' => $id, 'to' => "to-$stamp@example.com", 'cc' => "cc-$stamp@example.com", 'subject' => "Custom $stamp", 'message' => 'Hello there', 'attach_pdf' => false]);
+        $this->assertFalse($sent['isError'], $sent['text']);
+
+        $this->assertSame(0, $this->mailpit('search?query=' . urlencode("to:default-$stamp@example.com"))['messages_count']);
+        $search = $this->mailpit('search?query=' . urlencode("to:to-$stamp@example.com"));
+        $this->assertSame(1, $search['messages_count']);
+        $message = $this->mailpit('message/' . $search['messages'][0]['ID']);
+        $this->assertSame("Custom $stamp", $message['Subject']);
+        $this->assertSame("cc-$stamp@example.com", $message['Cc'][0]['Address']);
+        $this->assertSame([], $message['Attachments']);
+        $this->assertStringContainsString('Hello there', $message['Text']);
+    }
+
+    public function testSendRejectsHeaderInjectionAndInvalidAddresses(): void
+    {
+        $stamp = bin2hex(random_bytes(4));
+        $tp = $this->thirdparty("rejected-$stamp@example.com");
+        $id = $this->draftProposal($tp);
+        $this->assertFalse($this->action('proposal', $id, 'validate')['isError']);
+
+        $subject = $this->callTool('document_send', ['type' => 'proposal', 'id' => $id, 'subject' => "Hi\r\nBcc: evil-$stamp@example.com"]);
+        $this->assertTrue($subject['isError']);
+        $this->assertStringContainsString('subject', $subject['text']);
+        $address = $this->callTool('document_send', ['type' => 'proposal', 'id' => $id, 'to' => "ok-$stamp@example.com, not-an-address"]);
+        $this->assertTrue($address['isError']);
+        $this->assertStringContainsString('not-an-address', $address['text']);
+        $this->assertSame(0, $this->mailpit('search?query=' . urlencode("$stamp"))['messages_count']);
     }
 
     private function mailpit(string $path): array
