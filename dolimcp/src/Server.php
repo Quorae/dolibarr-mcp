@@ -9,9 +9,13 @@ use DoliMcp\Dolibarr\Journal;
 use DoliMcp\Mcp\Tool;
 use DoliMcp\Mcp\ToolResult;
 use DoliMcp\Tools\ApiTools;
+use DoliMcp\Tools\AccessTools;
+use DoliMcp\Tools\DictionaryTools;
 use DoliMcp\Tools\DocumentFiles;
 use DoliMcp\Tools\DocumentMail;
+use DoliMcp\Tools\DocumentSetupTools;
 use DoliMcp\Tools\DocumentTools;
+use DoliMcp\Tools\ExtrafieldTools;
 use DoliMcp\Tools\ObjectTools;
 use DoliMcp\Tools\SetupTools;
 use DoliMcp\Tools\TimeTools;
@@ -33,6 +37,10 @@ final class Server
         DocumentMail::register($registry, $context);
         TimeTools::register($registry, $context);
         SetupTools::register($registry, $context);
+        DocumentSetupTools::register($registry, $context);
+        DictionaryTools::register($registry, $context);
+        ExtrafieldTools::register($registry, $context);
+        AccessTools::register($registry, $context);
 
         return $registry;
     }

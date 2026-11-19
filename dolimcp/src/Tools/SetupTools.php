@@ -46,12 +46,8 @@ final class SetupTools
         require_once DOL_DOCUMENT_ROOT . '/core/lib/functions2.lib.php';
         require_once DOL_DOCUMENT_ROOT . '/core/lib/images.lib.php';
         require_once DOL_DOCUMENT_ROOT . '/core/lib/files.lib.php';
-        $schema = static fn (array $properties, array $required = []): array => ['type' => 'object', 'properties' => $properties, 'required' => $required, 'additionalProperties' => false];
-        $admin = static fn (callable $run): \Closure => static function (array $a) use ($context, $run): ToolResult {
-            self::requireAdmin($context);
-
-            return ToolResult::ok($run($a));
-        };
+        $schema = self::schema(...);
+        $admin = static fn (callable $run): \Closure => self::admin($context, $run);
         $company = [];
         foreach (self::COMPANY_FIELDS as $field => $constant) {
             $company[$field] = self::COMPANY_TYPES[$field] ?? ['type' => 'string'];
@@ -78,6 +74,30 @@ final class SetupTools
             $admin(fn (array $a): array => self::constSet($context, (string) $a['name'], (string) $a['value'])), true));
     }
 
+    /** Object schema shared by the setup tool families. */
+    public static function schema(array $properties, array $required = []): array
+    {
+        return ['type' => 'object', 'properties' => $properties, 'required' => $required, 'additionalProperties' => false];
+    }
+
+    /** Wraps a tool body: administrators only, result returned as is. */
+    public static function admin(Context $context, callable $run): \Closure
+    {
+        return static function (array $a) use ($context, $run): ToolResult {
+            self::requireAdmin($context);
+
+            return ToolResult::ok($run($a));
+        };
+    }
+
+    /** The entity Dolibarr works in (the admin pages use it; a user's own entity can be 0 on a single-entity install). */
+    public static function entity(): int
+    {
+        global $conf;
+
+        return (int) $conf->entity;
+    }
+
     public static function requireAdmin(Context $context): void
     {
         if (!$context->user->admin) {
@@ -98,7 +118,7 @@ final class SetupTools
         if ($prefix !== '') {
             $where[] = "name LIKE '" . $db->escape($db->escapeforlike($prefix)) . "%'";
         }
-        $resql = $db->query('SELECT name, value FROM ' . MAIN_DB_PREFIX . 'const WHERE entity IN (0, ' . (int) $context->user->entity . ')'
+        $resql = $db->query('SELECT name, value FROM ' . MAIN_DB_PREFIX . 'const WHERE entity IN (0, ' . self::entity() . ')'
             . ($where === [] ? '' : ' AND (' . implode(' OR ', $where) . ')') . ' ORDER BY name');
         if (!$resql) {
             throw new ToolError('Could not read the constants: ' . $db->lasterror());
@@ -128,9 +148,9 @@ final class SetupTools
     }
 
     /** The single place where a constant is written: empty value deletes, like the admin pages. */
-    private static function write(Context $context, string $name, string $value): void
+    public static function write(Context $context, string $name, string $value): void
     {
-        $entity = (int) $context->user->entity;
+        $entity = self::entity();
         $done = $value === '' ? dolibarr_del_const($context->db, $name, $entity) : dolibarr_set_const($context->db, $name, $value, 'chaine', 0, '', $entity);
         if ($done < 0) {
             throw new ToolError("Could not write the constant $name: " . $context->db->lasterror());
