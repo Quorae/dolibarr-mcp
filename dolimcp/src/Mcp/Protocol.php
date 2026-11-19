@@ -26,6 +26,15 @@ final class Protocol
 
     public function handle(Request $request): Response
     {
+        try {
+            return $this->dispatch($request);
+        } catch (\Throwable $e) {
+            return $this->error(500, null, -32603, 'Internal error: ' . $e::class);
+        }
+    }
+
+    private function dispatch(Request $request): Response
+    {
         if ($request->method !== 'POST') {
             return Response::empty(405);
         }
@@ -81,7 +90,7 @@ final class Protocol
                 'tools' => array_map(static fn (Tool $t): array => [
                     'name' => $t->name,
                     'description' => $t->description,
-                    'inputSchema' => $t->inputSchema,
+                    'inputSchema' => self::emptyPropertiesAsObjects($t->inputSchema),
                 ], $this->tools->all()),
                 'ttlMs' => 3600000,
                 'cacheScope' => 'private',
@@ -110,11 +119,35 @@ final class Protocol
         } catch (\Throwable $e) {
             $result = ToolResult::error('Internal error: ' . $e::class);
         }
+        try {
+            $formatted = $this->formatResult($result);
+        } catch (\JsonException $e) {
+            $result = ToolResult::error('Internal error: ' . $e::class);
+            $formatted = $this->formatResult($result);
+        }
         if ($tool->writes && $this->onWrite !== null) {
-            ($this->onWrite)($tool, $arguments, $result);
+            try {
+                ($this->onWrite)($tool, $arguments, $result);
+            } catch (\Throwable $e) {
+                // The write already happened: report the failure, never fail the call.
+                error_log('dolimcp: write hook failed: ' . $e::class . ': ' . $e->getMessage());
+            }
         }
 
-        return $this->result($id, $this->formatResult($result), $modern);
+        return $this->result($id, $formatted, $modern);
+    }
+
+    /** An empty `properties` must encode as `{}`, not `[]`, at any depth. */
+    private static function emptyPropertiesAsObjects(array $schema): array
+    {
+        foreach ($schema as $key => $value) {
+            if ($key === 'properties' && $value === []) {
+                $schema[$key] = new \stdClass();
+            } elseif (is_array($value)) {
+                $schema[$key] = self::emptyPropertiesAsObjects($value);
+            }
+        }
+        return $schema;
     }
 
     private function formatResult(ToolResult $r): array
@@ -122,14 +155,19 @@ final class Protocol
         if ($r->isError) {
             return ['isError' => true, 'content' => [['type' => 'text', 'text' => (string) $r->data]]];
         }
-        $text = json_encode($r->data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $text = json_encode(
+            $r->data,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+        );
         $content = [];
         if ($r->file !== null) {
             $content[] = ['type' => 'resource', 'resource' => $r->file];
         }
         $content[] = ['type' => 'text', 'text' => $text];
         $out = ['content' => $content];
-        if ($r->file === null) {
+        // structuredContent must be a JSON object: lists, [] and scalars only travel in the text block.
+        $isObject = is_object($r->data) || is_array($r->data) && $r->data !== [] && !array_is_list($r->data);
+        if ($r->file === null && $isObject) {
             $out['structuredContent'] = $r->data;
         }
         return $out;

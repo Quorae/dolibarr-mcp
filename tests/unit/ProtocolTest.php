@@ -29,6 +29,12 @@ final class ProtocolTest extends TestCase
         $this->registry->add(new Tool('boom', 'B', $schema, static fn (array $a): ToolResult => throw new \LogicException('secret path /srv/x')));
         $this->registry->add(new Tool('file', 'F', $schema, static fn (array $a): ToolResult => ToolResult::file('dolibarr://f', 'application/pdf', 'QUJD', ['name' => 'f.pdf'])));
         $this->registry->add(new Tool('write', 'W', $schema, static fn (array $a): ToolResult => ToolResult::ok(['done' => true]), true));
+        $mk = static fn (string $n, mixed $d): Tool => new Tool($n, $n, ['type' => 'object', 'properties' => []], static fn (array $a): ToolResult => ToolResult::ok($d));
+        $this->registry->add($mk('badutf8', "caf\xE9"));
+        $this->registry->add($mk('nan', NAN));
+        $this->registry->add($mk('list', [['id' => 1]]));
+        $this->registry->add($mk('emptylist', []));
+        $this->registry->add(new Tool('hookwrite', 'H', ['type' => 'object'], static fn (array $a): ToolResult => ToolResult::ok(['ok' => true]), true));
         $this->protocol = new Protocol($this->registry, '1.2.3', function (Tool $t, array $args, ToolResult $r): void {
             $this->writes[] = [$t->name, $args, $r->isError];
         });
@@ -146,7 +152,7 @@ final class ProtocolTest extends TestCase
     {
         $res = $this->decode($this->modern('tools/list'))['result'];
         $this->assertSame('complete', $res['resultType']);
-        $this->assertSame(['alpha', 'boom', 'file', 'write', 'zeta'], array_column($res['tools'], 'name'));
+        $this->assertSame(['alpha', 'badutf8', 'boom', 'emptylist', 'file', 'hookwrite', 'list', 'nan', 'write', 'zeta'], array_column($res['tools'], 'name'));
         $this->assertSame(['name', 'description', 'inputSchema'], array_keys($res['tools'][0]));
         $this->assertSame(3600000, $res['ttlMs']);
         $this->assertSame('private', $res['cacheScope']);
@@ -211,5 +217,60 @@ final class ProtocolTest extends TestCase
         $this->assertSame([], $this->writes);
         $this->modern('tools/call', ['name' => 'write', 'arguments' => ['n' => 1]]);
         $this->assertSame([['write', ['n' => 1], false]], $this->writes);
+    }
+
+    private function callNoArgs(string $name): array
+    {
+        return $this->decode($this->modern('tools/call', ['name' => $name, 'arguments' => []]))['result'];
+    }
+
+    public function testInvalidUtf8IsSubstitutedNotFailed(): void
+    {
+        $res = $this->callNoArgs('badutf8');
+        $this->assertArrayNotHasKey('isError', $res);
+        $this->assertSame("\"caf\u{FFFD}\"", $res['content'][0]['text']);
+    }
+
+    public function testUnencodableResultBecomesInternalError(): void
+    {
+        $res = $this->callNoArgs('nan');
+        $this->assertTrue($res['isError']);
+        $this->assertSame('Internal error: JsonException', $res['content'][0]['text']);
+    }
+
+    public function testFailingWriteHookDoesNotFailTheCall(): void
+    {
+        $logged = ini_set('error_log', '/dev/null');
+        $protocol = new Protocol($this->registry, '1', static function (): void {
+            throw new \RuntimeException('journal down');
+        });
+        $msg = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'hookwrite', 'arguments' => []]];
+        $r = $protocol->handle(new Request('POST', [], json_encode($msg)));
+        ini_set('error_log', (string) $logged);
+        $this->assertSame(200, $r->status);
+        $this->assertSame(['ok' => true], $this->decode($r)['result']['structuredContent']);
+    }
+
+    public function testStructuredContentOnlyForJsonObjects(): void
+    {
+        $list = $this->callNoArgs('list');
+        $this->assertArrayNotHasKey('structuredContent', $list);
+        $this->assertSame('[{"id":1}]', $list['content'][0]['text']);
+        $empty = $this->callNoArgs('emptylist');
+        $this->assertArrayNotHasKey('structuredContent', $empty);
+        $this->assertSame('[]', $empty['content'][0]['text']);
+        $this->assertArrayHasKey('structuredContent', $this->callNoArgs('hookwrite'));
+    }
+
+    public function testEmptyPropertiesEncodeAsObjectInToolsList(): void
+    {
+        $this->assertStringContainsString('"inputSchema":{"type":"object","properties":{}}', $this->modern('tools/list')->body);
+    }
+
+    public function testLegacyRequestAfterInitializeWithoutMcpMethodHeaderIsAccepted(): void
+    {
+        $r = $this->post(['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/list'], ['mcp-protocol-version' => '2025-06-18']);
+        $this->assertSame(200, $r->status);
+        $this->assertCount(10, $this->decode($r)['result']['tools']);
     }
 }

@@ -101,9 +101,13 @@ abstract class McpTestCase extends TestCase
             }
         }
 
+        $isError = (bool) ($result['isError'] ?? false);
+        // structuredContent only carries JSON objects; lists and scalars come back in the text block.
+        $data = $result['structuredContent'] ?? ($isError ? null : json_decode($text, true));
+
         return [
-            'isError' => (bool) ($result['isError'] ?? false),
-            'data' => $result['structuredContent'] ?? null,
+            'isError' => $isError,
+            'data' => $data,
             'text' => $text,
             'content' => $content,
         ];
