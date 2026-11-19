@@ -21,6 +21,9 @@
  *  \brief      DoliMcp setup page: endpoint address, Claude Code command, internal API URL, journal.
  */
 
+// Check the CSRF token of every POST: the form below changes the address API keys are sent to.
+define('CSRFCHECK_WITH_TOKEN', '1');
+
 $res = 0;
 if (!$res && !empty($_SERVER['CONTEXT_DOCUMENT_ROOT'])) {
 	$res = @include str_replace('..', '', $_SERVER['CONTEXT_DOCUMENT_ROOT']).'/main.inc.php';
@@ -52,9 +55,16 @@ if (!$user->admin) {
 
 $action = GETPOST('action', 'aZ09');
 
-// The token of a POST is checked by main.inc.php; the form below carries newToken().
+// main.inc.php checks the token of a POST (CSRFCHECK_WITH_TOKEN, defined above); the form carries newToken().
 if ($action == 'save') {
-	$result = dolibarr_set_const($db, 'DOLIMCP_API_URL', trim(GETPOST('DOLIMCP_API_URL', 'alphanohtml')), 'chaine', 0, '', $conf->entity);
+	$apiUrl = trim(GETPOST('DOLIMCP_API_URL', 'alphanohtml'));
+	// The module sends callers' API keys to this address: only an http(s) URL, or empty for the default.
+	if ($apiUrl !== '' && !preg_match('#^https?://[^\s/]+#i', $apiUrl)) {
+		setEventMessages($langs->trans('DoliMcpApiUrlInvalid'), null, 'errors');
+		header('Location: '.$_SERVER['PHP_SELF']);
+		exit;
+	}
+	$result = dolibarr_set_const($db, 'DOLIMCP_API_URL', $apiUrl, 'chaine', 0, '', $conf->entity);
 	if ($result > 0) {
 		setEventMessages($langs->trans('SetupSaved'), null, 'mesgs');
 	} else {

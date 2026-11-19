@@ -13,3 +13,4 @@ DoliMcpJournal = Journal des 100 derniers appels en écriture
 DoliMcpJournalEmpty = Aucun appel enregistré
 DoliMcpTool = Outil
 DoliMcpOutcome = Résultat
+DoliMcpApiUrlInvalid = L'URL interne de l'API doit être vide ou commencer par http:// ou https://
