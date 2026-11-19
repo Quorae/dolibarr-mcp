@@ -69,14 +69,20 @@ final class TimeTools
         TimeInvoice::register($registry, $context);
     }
 
-    /** Projects the user may see: null when all of them. */
+    /**
+     * Ids of the projects the user may see, as projet/tasks/time.php: null when all of them,
+     * the projects of their own third party for an external user.
+     */
     public static function visibleProjects(Context $context): ?array
     {
-        if ($context->user->hasRight('projet', 'all', 'lire')) {
+        $user = $context->user;
+        $external = (int) $user->socid > 0;
+        if (!$external && $user->hasRight('projet', 'all', 'lire')) {
             return null;
         }
 
-        return array_map('intval', (array) (new \Project($context->db))->getProjectsAuthorizedForUser($context->user, 0, 0));
+        // The list is a map id => ref.
+        return array_map('intval', array_keys((array) (new \Project($context->db))->getProjectsAuthorizedForUser($user, 0, 0, $external ? (int) $user->socid : 0)));
     }
 
     public static function requireRight(Context $context, int|bool|null $allowed, string $what): void

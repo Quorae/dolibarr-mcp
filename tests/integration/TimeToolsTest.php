@@ -239,4 +239,97 @@ final class TimeToolsTest extends McpTestCase
         $this->assertTrue($r['isError']);
         $this->assertStringContainsString('nothing to invoice', strtolower($r['text']));
     }
+
+    public function testSecondInvoiceOfTheSameEntriesIsRefused(): void
+    {
+        $f = $this->fixture();
+        $entry = $this->log(['task_id' => $f['tasks'][0], 'date' => '2026-11-19', 'duration' => 60]);
+        $first = $this->callTool('time_invoice', ['project_id' => $f['project'], 'hourly_price' => 80]);
+        $this->assertFalse($first['isError'], $first['text']);
+        $invoiceId = (int) $first['data']['invoice']['id'];
+        $this->delete("invoices/$invoiceId");
+
+        $again = $this->callTool('time_invoice', ['project_id' => $f['project'], 'hourly_price' => 80, 'time_entry_ids' => [$entry['id']]]);
+        $this->assertTrue($again['isError']);
+        $this->assertStringContainsString('nothing to invoice', strtolower($again['text']));
+        $invoices = $this->rest('GET', 'invoices?thirdparty_ids=' . $f['thirdparty']);
+        $this->assertCount(1, $invoices['body']);
+
+        $listed = $this->callTool('time_entry_list', ['project_id' => $f['project'], 'invoiced' => true]);
+        $this->assertSame([$entry['id']], array_column($listed['data'], 'id'));
+        $this->assertSame($invoiceId, $listed['data'][0]['invoice_id']);
+    }
+
+    /** @return array{id: int, key: string} a non-admin user who may read projects and log time (and renew their own key, which /login needs) */
+    private function restrictedUser(int $thirdpartyId = 0): array
+    {
+        $login = 'tm' . bin2hex(random_bytes(4));
+        $fields = ['login' => $login, 'pass' => 'Restricted-pass-1', 'lastname' => $login, 'admin' => 0];
+        $id = (int) $this->rest('POST', 'users', $fields)['body'];
+        $this->assertGreaterThan(0, $id);
+        $this->cleanup[] = function () use ($id): void {
+            self::db()->query("DELETE FROM llx_user_rights WHERE fk_user = $id");
+            $this->rest('DELETE', "users/$id");
+        };
+        self::db()->query("INSERT INTO llx_user_rights (entity, fk_user, fk_id) SELECT 1, $id, id FROM llx_rights_def WHERE (module = 'projet' AND perms IN ('lire', 'time') AND (subperms IS NULL OR subperms = '')) OR (module = 'user' AND perms = 'self' AND subperms = 'creer')");
+        $this->assertSame(3, self::db()->affected_rows);
+        if ($thirdpartyId > 0) { // the REST API does not set the third party of a user
+            self::db()->query("UPDATE llx_user SET fk_soc = $thirdpartyId WHERE rowid = $id");
+        }
+        // POST /login with the password sets and returns the API key of the user.
+        $url = getenv('REST_URL') . '/login';
+        $raw = file_get_contents($url, false, stream_context_create(['http' => [
+            'method' => 'POST', 'header' => "Content-Type: application/json\r\nAccept: application/json", 'content' => json_encode(['login' => $login, 'password' => 'Restricted-pass-1']), 'ignore_errors' => true,
+        ]]));
+        $key = json_decode((string) $raw, true)['success']['token'] ?? null;
+        $this->assertIsString($key, (string) $raw);
+
+        return ['id' => $id, 'key' => $key];
+    }
+
+    private function makeContact(int $projectId, int $userId): void
+    {
+        self::db()->query("INSERT INTO llx_element_contact (datecreate, statut, element_id, fk_c_type_contact, fk_socpeople) SELECT NOW(), 4, $projectId, rowid, $userId FROM llx_c_type_contact WHERE element = 'project' AND source = 'internal' AND code = 'PROJECTLEADER'");
+        $this->assertSame(1, self::db()->affected_rows);
+    }
+
+    public function testRestrictedUserSeesOnlyTheProjectsTheyAreOn(): void
+    {
+        $mine = $this->fixture();
+        $other = $this->fixture();
+        $user = $this->restrictedUser();
+        $this->makeContact($mine['project'], $user['id']);
+
+        $projects = $this->callTool('project_list', [], $user['key']);
+        $this->assertFalse($projects['isError'], $projects['text']);
+        $ids = array_column($projects['data'], 'id');
+        $this->assertContains($mine['project'], $ids);
+        $this->assertNotContains($other['project'], $ids);
+
+        $entry = $this->callTool('time_entry_create', ['project_id' => $mine['project'], 'date' => '2026-11-19', 'duration' => '1h'], $user['key']);
+        $this->assertFalse($entry['isError'], $entry['text']);
+        $this->cleanup[] = fn () => $this->callTool('time_entry_delete', ['id' => $entry['data']['id']], $user['key']);
+        $this->assertSame(
+            [$entry['data']['id']],
+            array_column($this->callTool('time_entry_list', ['project_id' => $mine['project']], $user['key'])['data'], 'id'),
+        );
+
+        $this->assertTrue($this->callTool('time_entry_create', ['task_id' => $other['tasks'][0], 'date' => '2026-11-19', 'duration' => '1h'], $user['key'])['isError']);
+        $adminEntry = $this->log(['task_id' => $other['tasks'][0], 'date' => '2026-11-19', 'duration' => 60]);
+        $this->assertTrue($this->callTool('time_entry_get', ['id' => $adminEntry['id']], $user['key'])['isError']);
+    }
+
+    public function testExternalUserSeesOnlyProjectsOfTheirThirdparty(): void
+    {
+        $mine = $this->fixture();
+        $other = $this->fixture();
+        $user = $this->restrictedUser($mine['thirdparty']);
+        // Contact of both projects: only the third party restriction tells them apart.
+        $this->makeContact($mine['project'], $user['id']);
+        $this->makeContact($other['project'], $user['id']);
+
+        $ids = array_column($this->callTool('project_list', [], $user['key'])['data'], 'id');
+        $this->assertContains($mine['project'], $ids);
+        $this->assertNotContains($other['project'], $ids);
+    }
 }

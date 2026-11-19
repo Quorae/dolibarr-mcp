@@ -137,15 +137,22 @@ final class TimeInvoice
                 }
                 // Exactly the link projet/tasks/time.php writes, limited to the entries of this line.
                 $ids = implode(',', array_map('intval', array_column($group, 'rowid')));
-                if (!$db->query('UPDATE ' . MAIN_DB_PREFIX . 'element_time SET invoice_line_id = ' . (int) $lineId . ', invoice_id = ' . (int) $invoice->id . " WHERE rowid IN ($ids)")) {
+                // The guard keeps two concurrent calls from invoicing the same entries twice.
+                $linked = $db->query('UPDATE ' . MAIN_DB_PREFIX . 'element_time SET invoice_line_id = ' . (int) $lineId . ', invoice_id = ' . (int) $invoice->id . " WHERE rowid IN ($ids) AND (invoice_id IS NULL OR invoice_id = 0)");
+                if (!$linked) {
                     throw new ToolError('Could not link the time entries to the invoice: ' . $db->lasterror());
+                }
+                if ($db->affected_rows($linked) !== count($group)) {
+                    throw new ToolError('Some of these time entries were invoiced in the meantime; nothing was invoiced, try again.');
                 }
             }
         } catch (\Throwable $e) {
             $db->rollback();
             throw $e;
         }
-        $db->commit();
+        if ($db->commit() <= 0) {
+            throw new ToolError('Dolibarr could not save the invoice: ' . $db->lasterror());
+        }
 
         return [
             'invoice' => ObjectTypes::present('invoice', $context->rest->request('GET', 'invoices/' . $invoice->id)),
@@ -157,7 +164,7 @@ final class TimeInvoice
     private static function entries(Context $context, int $projectId, array $a): array
     {
         $db = $context->db;
-        $where = ["pt.fk_projet = $projectId", "t.elementtype = 'task'", '(t.invoice_id IS NULL OR t.invoice_id = 0)'];
+        $where = ["pt.fk_projet = $projectId", "t.elementtype = 'task'", 'pt.entity IN (' . getEntity('project') . ')', '(t.invoice_id IS NULL OR t.invoice_id = 0)'];
         if (isset($a['time_entry_ids'])) {
             $where[] = 't.rowid IN (' . implode(',', array_map('intval', (array) $a['time_entry_ids']) ?: [0]) . ')';
         }
