@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace DoliMcp;
 
 use DoliMcp\Dolibarr\Context;
+use DoliMcp\Dolibarr\Journal;
+use DoliMcp\Mcp\Tool;
+use DoliMcp\Mcp\ToolResult;
+use DoliMcp\Tools\ApiTools;
 use DoliMcp\Mcp\Protocol;
 use DoliMcp\Mcp\ToolRegistry;
 use DoliMcp\Tools\CoreTools;
@@ -16,13 +20,18 @@ final class Server
     {
         $registry = new ToolRegistry();
         CoreTools::register($registry, $context);
+        ApiTools::register($registry, $context);
 
         return $registry;
     }
 
     public static function protocol(Context $context): Protocol
     {
-        return new Protocol(self::registry($context), self::version($context), null);
+        return new Protocol(
+            self::registry($context),
+            self::version($context),
+            static fn (Tool $tool, array $arguments, ToolResult $result) => (new Journal($context->db, $context->user))->record($tool, $arguments, $result),
+        );
     }
 
     // The module descriptor is the single source of the version.
