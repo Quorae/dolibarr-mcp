@@ -79,6 +79,32 @@ final class SetupToolsTest extends McpTestCase
         $this->assertTrue($this->callTool('module_set', ['module' => 'NoSuchModule', 'enabled' => true])['isError']);
     }
 
+    public function testMcpModulesCannotBeCutOff(): void
+    {
+        foreach (['DoliMcp', 'Api'] as $module) {
+            $r = $this->callTool('module_set', ['module' => $module, 'enabled' => false]);
+            $this->assertTrue($r['isError']);
+            $this->assertStringContainsString('Setup > Modules', $r['text']);
+        }
+        $enabled = array_column($this->callTool('module_list', ['enabled_only' => true])['data'], 'name');
+        $this->assertContains('DoliMcp', $enabled);
+        $this->assertContains('Api', $enabled);
+
+        foreach (['MAIN_MODULE_API', 'MAIN_MODULE_DOLIMCP'] as $name) {
+            $this->assertTrue($this->callTool('const_set', ['name' => $name, 'value' => ''])['isError'], $name);
+        }
+        $this->assertNotSame([], $this->callTool('const_get', ['names' => ['MAIN_MODULE_API']])['data']);
+    }
+
+    public function testNonImageLogoIsRefusedAndConstantsUnchanged(): void
+    {
+        $read = fn (): array => $this->callTool('const_get', ['prefix' => 'MAIN_INFO_SOCIETE_LOGO'])['data'];
+        $before = $read();
+        $r = $this->callTool('company_logo_set', ['filename' => 'x.png', 'content_base64' => base64_encode('not an image')]);
+        $this->assertTrue($r['isError']);
+        $this->assertSame($before, $read());
+    }
+
     public function testSecretConstantIsNeverReturned(): void
     {
         try {

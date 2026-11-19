@@ -34,6 +34,9 @@ final class SetupTools
         'state' => ['type' => 'string', 'description' => 'Department code in the company country, e.g. 75.'],
         'legal_form' => ['type' => 'string', 'description' => 'Dolibarr legal form code for the company country, e.g. 54 (SARL) in France.'],
     ];
+    // Disabling these cuts the MCP off; they can only be re-enabled from Dolibarr's interface.
+    private const PROTECTED_MODULES = ['DoliMcp', 'Api'];
+    private const PROTECTED_MESSAGE = 'The MCP depends on this module; to disable it, use Dolibarr (Setup > Modules).';
     private const MAX_LOGO_BYTES = 5_000_000;
 
     public static function register(ToolRegistry $registry, Context $context): void
@@ -113,6 +116,11 @@ final class SetupTools
     {
         if (preg_match('/^[A-Za-z0-9_]+$/', $name) !== 1) {
             throw new ToolError('A constant name is made of letters, digits and underscores.');
+        }
+        foreach (self::PROTECTED_MODULES as $module) {
+            if (strtoupper($name) === 'MAIN_MODULE_' . strtoupper($module)) {
+                throw new ToolError(self::PROTECTED_MESSAGE);
+            }
         }
         self::write($context, $name, $value);
 
@@ -226,6 +234,11 @@ final class SetupTools
             throw new ToolError('content_base64 must be valid base64 of at most 5 MB.');
         }
 
+        $info = @getimagesizefromstring($content);
+        if ($info === false || !in_array($info[2], [IMAGETYPE_GIF, IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP], true)) {
+            throw new ToolError('The content is not a valid png, jpg, gif or webp image.');
+        }
+
         $dir = $conf->mycompany->dir_output . '/logos/';
         dol_mkdir($dir);
         $tmp = tempnam(sys_get_temp_dir(), 'dolimcp');
@@ -237,13 +250,22 @@ final class SetupTools
             throw new ToolError('Could not store the logo file.');
         }
 
-        self::write($context, 'MAIN_INFO_SOCIETE_LOGO', $name);
+        // The constants are written once the file and both thumbnails exist.
         $sizes = getDefaultImageSizes();
+        $constants = ['MAIN_INFO_SOCIETE_LOGO' => $name];
         foreach (['_small' => ['maxwidthsmall', 'maxheightsmall'], '_mini' => ['maxwidthmini', 'maxheightmini']] as $suffix => [$width, $height]) {
             $thumb = vignette($dir . $name, $sizes[$width], $sizes[$height], $suffix, $sizes['quality']);
-            if (image_format_supported($thumb) >= 0 && preg_match('/([^\\/:]+)$/', $thumb, $m) === 1) {
-                self::write($context, 'MAIN_INFO_SOCIETE_LOGO' . strtoupper($suffix), $m[1]);
+            if (image_format_supported($thumb) < 0 || preg_match('/([^\\/:]+)$/', $thumb, $m) !== 1) {
+                dol_delete_file($dir . $name);
+                foreach (glob($dir . 'thumbs/' . pathinfo($name, PATHINFO_FILENAME) . '_*') ?: [] as $file) {
+                    dol_delete_file($file);
+                }
+                throw new ToolError('Could not create the logo thumbnails.');
             }
+            $constants['MAIN_INFO_SOCIETE_LOGO' . strtoupper($suffix)] = $m[1];
+        }
+        foreach ($constants as $constant => $value) {
+            self::write($context, $constant, $value);
         }
 
         return ['logo' => $name];
@@ -287,9 +309,13 @@ final class SetupTools
 
     private static function moduleSet(Context $context, string $module, bool $enabled): array
     {
+        if (!$enabled && in_array($module, self::PROTECTED_MODULES, true)) {
+            throw new ToolError(self::PROTECTED_MESSAGE);
+        }
         if (!isset(self::descriptors()[$module])) {
             throw new ToolError("Unknown module $module; module_list gives the names.");
         }
+        $before = array_column(self::modules($context, true), 'name');
         if ($enabled) {
             $errors = (array) (activateModule('mod' . $module)['errors'] ?? []);
         } else {
@@ -300,6 +326,13 @@ final class SetupTools
             throw new ToolError(trim(strip_tags(str_replace('<br>', ' ', implode(' ', array_map('strval', $errors))))));
         }
 
-        return ['module' => $module, 'enabled' => $enabled];
+        $result = ['module' => $module, 'enabled' => $enabled];
+        // Disabling a module disables the ones that depend on it; enabling one enables its dependencies.
+        $changed = array_values(array_diff($enabled ? array_column(self::modules($context, true), 'name') : $before, $enabled ? $before : array_column(self::modules($context, true), 'name'), [$module]));
+        if ($changed !== []) {
+            $result[$enabled ? 'also_enabled' : 'also_disabled'] = $changed;
+        }
+
+        return $result;
     }
 }
