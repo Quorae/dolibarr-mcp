@@ -13,6 +13,7 @@ use DoliMcp\Tools\DocumentFiles;
 use DoliMcp\Tools\DocumentMail;
 use DoliMcp\Tools\DocumentTools;
 use DoliMcp\Tools\ObjectTools;
+use DoliMcp\Tools\SetupTools;
 use DoliMcp\Tools\TimeTools;
 use DoliMcp\Mcp\Protocol;
 use DoliMcp\Mcp\ToolRegistry;
@@ -31,6 +32,7 @@ final class Server
         DocumentFiles::register($registry, $context);
         DocumentMail::register($registry, $context);
         TimeTools::register($registry, $context);
+        SetupTools::register($registry, $context);
 
         return $registry;
     }

@@ -12,6 +12,20 @@ abstract class McpTestCase extends TestCase
     private const ADMIN_PASSWORD = 'admin-test-pass';
     private const PROTOCOL_VERSION = '2026-07-28';
 
+    /** @var list<callable> */
+    protected array $cleanup = [];
+
+    protected function tearDown(): void
+    {
+        foreach (array_reverse($this->cleanup) as $undo) {
+            try {
+                $undo();
+            } catch (\Throwable) {
+            }
+        }
+        $this->cleanup = [];
+    }
+
     private static ?string $apiKey = null;
     private static ?\mysqli $db = null;
 
@@ -51,6 +65,33 @@ abstract class McpTestCase extends TestCase
         $value = self::db()->real_escape_string($value);
         self::db()->query("DELETE FROM llx_const WHERE name = '$name' AND entity = 1");
         self::db()->query("INSERT INTO llx_const (name, entity, value, type, visible) VALUES ('$name', 1, '$value', 'chaine', 0)");
+    }
+
+    /** @return array{id: int, key: string} a non-admin user who may read projects and log time (and renew their own key, which /login needs) */
+    protected function restrictedUser(int $thirdpartyId = 0): array
+    {
+        $login = 'tm' . bin2hex(random_bytes(4));
+        $fields = ['login' => $login, 'pass' => 'Restricted-pass-1', 'lastname' => $login, 'admin' => 0];
+        $id = (int) $this->rest('POST', 'users', $fields)['body'];
+        $this->assertGreaterThan(0, $id);
+        $this->cleanup[] = function () use ($id): void {
+            self::db()->query("DELETE FROM llx_user_rights WHERE fk_user = $id");
+            $this->rest('DELETE', "users/$id");
+        };
+        self::db()->query("INSERT INTO llx_user_rights (entity, fk_user, fk_id) SELECT 1, $id, id FROM llx_rights_def WHERE (module = 'projet' AND perms IN ('lire', 'time') AND (subperms IS NULL OR subperms = '')) OR (module = 'user' AND perms = 'self' AND subperms = 'creer')");
+        $this->assertSame(3, self::db()->affected_rows);
+        if ($thirdpartyId > 0) { // the REST API does not set the third party of a user
+            self::db()->query("UPDATE llx_user SET fk_soc = $thirdpartyId WHERE rowid = $id");
+        }
+        // POST /login with the password sets and returns the API key of the user.
+        $url = getenv('REST_URL') . '/login';
+        $raw = file_get_contents($url, false, stream_context_create(['http' => [
+            'method' => 'POST', 'header' => "Content-Type: application/json\r\nAccept: application/json", 'content' => json_encode(['login' => $login, 'password' => 'Restricted-pass-1']), 'ignore_errors' => true,
+        ]]));
+        $key = json_decode((string) $raw, true)['success']['token'] ?? null;
+        $this->assertIsString($key, (string) $raw);
+
+        return ['id' => $id, 'key' => $key];
     }
 
     protected static function db(): \mysqli

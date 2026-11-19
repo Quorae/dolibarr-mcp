@@ -6,20 +6,6 @@ namespace DoliMcp\Tests\Integration;
 
 final class TimeToolsTest extends McpTestCase
 {
-    /** @var list<callable> */
-    private array $cleanup = [];
-
-    protected function tearDown(): void
-    {
-        foreach (array_reverse($this->cleanup) as $undo) {
-            try {
-                $undo();
-            } catch (\Throwable) {
-            }
-        }
-        $this->cleanup = [];
-    }
-
     private function delete(string $path): void
     {
         $this->cleanup[] = fn () => $this->rest('DELETE', $path);
@@ -258,33 +244,6 @@ final class TimeToolsTest extends McpTestCase
         $listed = $this->callTool('time_entry_list', ['project_id' => $f['project'], 'invoiced' => true]);
         $this->assertSame([$entry['id']], array_column($listed['data'], 'id'));
         $this->assertSame($invoiceId, $listed['data'][0]['invoice_id']);
-    }
-
-    /** @return array{id: int, key: string} a non-admin user who may read projects and log time (and renew their own key, which /login needs) */
-    private function restrictedUser(int $thirdpartyId = 0): array
-    {
-        $login = 'tm' . bin2hex(random_bytes(4));
-        $fields = ['login' => $login, 'pass' => 'Restricted-pass-1', 'lastname' => $login, 'admin' => 0];
-        $id = (int) $this->rest('POST', 'users', $fields)['body'];
-        $this->assertGreaterThan(0, $id);
-        $this->cleanup[] = function () use ($id): void {
-            self::db()->query("DELETE FROM llx_user_rights WHERE fk_user = $id");
-            $this->rest('DELETE', "users/$id");
-        };
-        self::db()->query("INSERT INTO llx_user_rights (entity, fk_user, fk_id) SELECT 1, $id, id FROM llx_rights_def WHERE (module = 'projet' AND perms IN ('lire', 'time') AND (subperms IS NULL OR subperms = '')) OR (module = 'user' AND perms = 'self' AND subperms = 'creer')");
-        $this->assertSame(3, self::db()->affected_rows);
-        if ($thirdpartyId > 0) { // the REST API does not set the third party of a user
-            self::db()->query("UPDATE llx_user SET fk_soc = $thirdpartyId WHERE rowid = $id");
-        }
-        // POST /login with the password sets and returns the API key of the user.
-        $url = getenv('REST_URL') . '/login';
-        $raw = file_get_contents($url, false, stream_context_create(['http' => [
-            'method' => 'POST', 'header' => "Content-Type: application/json\r\nAccept: application/json", 'content' => json_encode(['login' => $login, 'password' => 'Restricted-pass-1']), 'ignore_errors' => true,
-        ]]));
-        $key = json_decode((string) $raw, true)['success']['token'] ?? null;
-        $this->assertIsString($key, (string) $raw);
-
-        return ['id' => $id, 'key' => $key];
     }
 
     private function makeContact(int $projectId, int $userId): void
