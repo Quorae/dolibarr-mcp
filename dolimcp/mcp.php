@@ -70,11 +70,28 @@ if (!isModEnabled('dolimcp')) {
     dolimcpError(503, -32003, 'The dolimcp module is not enabled');
 }
 
-// Same key sources as DolibarrApiAccess::__isAllowed().
+// Same derivation as DolibarrApiAccess::__isAllowed(): same order, isset checks, Bearer when empty.
 $headers = array_change_key_case(getallheaders() ?: [], CASE_LOWER);
-$apiKey = $_SERVER['HTTP_DOLAPIKEY'] ?? ($_GET['DOLAPIKEY'] ?? $_GET['api_key'] ?? preg_replace('/^Bearer\s+/i', '', $headers['authorization'] ?? ''));
+$apiKey = '';
+if (isset($_GET['api_key'])) {
+    $apiKey = $_GET['api_key'];
+}
+if (isset($_GET['DOLAPIKEY'])) {
+    $apiKey = $_GET['DOLAPIKEY'];
+}
+if (isset($_SERVER['HTTP_DOLAPIKEY'])) {
+    $apiKey = $_SERVER['HTTP_DOLAPIKEY'];
+} elseif (empty($apiKey)) {
+    $apiKey = preg_replace('/^Bearer\s+/i', '', empty($headers['authorization']) ? '' : $headers['authorization']);
+}
+$apiKey = dol_string_nounprintableascii((string) $apiKey, 1);
 
-$context = new Context($db, DolibarrApiAccess::$user, (string) $apiKey);
-$request = new Request($_SERVER['REQUEST_METHOD'] ?? 'GET', $headers, (string) file_get_contents('php://input'));
+try {
+    $context = new Context($db, DolibarrApiAccess::$user, $apiKey);
+    $request = new Request($_SERVER['REQUEST_METHOD'] ?? 'GET', $headers, (string) file_get_contents('php://input'));
+    $response = Server::protocol($context)->handle($request);
+} catch (Throwable $e) {
+    $response = Response::json(500, ['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => -32603, 'message' => 'Internal error']]);
+}
 
-dolimcpSend(Server::protocol($context)->handle($request));
+dolimcpSend($response);

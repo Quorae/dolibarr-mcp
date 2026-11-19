@@ -6,21 +6,11 @@ namespace DoliMcp\Tests\Integration;
 
 final class EndpointTest extends McpTestCase
 {
-    /** @var list<array{status: int, headers: array<string, string>, body: ?array}> */
-    private static array $jsonResponses = [];
-
     private const PING = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'];
-
-    private function track(array $response): array
-    {
-        self::$jsonResponses[] = $response;
-
-        return $response;
-    }
 
     public function testMissingKeyGets401Json(): void
     {
-        $response = $this->track($this->mcp(self::PING, [], ''));
+        $response = ($this->mcp(self::PING, [], ''));
 
         $this->assertSame(401, $response['status']);
         $this->assertSame(-32001, $response['body']['error']['code']);
@@ -29,7 +19,7 @@ final class EndpointTest extends McpTestCase
 
     public function testWrongKeyGets401Json(): void
     {
-        $response = $this->track($this->mcp(self::PING, [], 'not-a-real-key'));
+        $response = ($this->mcp(self::PING, [], 'not-a-real-key'));
 
         $this->assertSame(401, $response['status']);
         $this->assertSame(-32001, $response['body']['error']['code']);
@@ -37,7 +27,7 @@ final class EndpointTest extends McpTestCase
 
     public function testForeignOriginGets403(): void
     {
-        $response = $this->track($this->mcp(self::PING, ['Origin' => 'https://evil.example.com']));
+        $response = ($this->mcp(self::PING, ['Origin' => 'https://evil.example.com']));
 
         $this->assertSame(403, $response['status']);
     }
@@ -56,15 +46,15 @@ final class EndpointTest extends McpTestCase
 
     public function testLegacyClientCanInitializeListAndCall(): void
     {
-        $init = $this->track($this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => ['protocolVersion' => '2025-06-18']]));
+        $init = ($this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => ['protocolVersion' => '2025-06-18']]));
         $this->assertSame(200, $init['status']);
         $this->assertSame('2025-06-18', $init['body']['result']['protocolVersion']);
 
-        $list = $this->track($this->mcp(self::PING));
+        $list = ($this->mcp(self::PING));
         $names = array_column($list['body']['result']['tools'], 'name');
         $this->assertContains('whoami', $names);
 
-        $call = $this->track($this->mcp(['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => 'whoami', 'arguments' => (object) []]]));
+        $call = ($this->mcp(['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => 'whoami', 'arguments' => (object) []]]));
         $this->assertSame(200, $call['status']);
         $this->assertFalse($call['body']['result']['isError'] ?? false);
     }
@@ -81,10 +71,31 @@ final class EndpointTest extends McpTestCase
         $this->assertArrayHasKey('entity', $result['data']);
     }
 
+    public function testBearerKeyWorksWhenApiKeyQueryParameterIsEmpty(): void
+    {
+        $context = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\nAuthorization: Bearer " . self::apiKey(),
+            'content' => json_encode(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list']),
+            'ignore_errors' => true,
+        ]]);
+        $raw = file_get_contents(getenv('MCP_URL') . '?api_key=', false, $context);
+
+        $this->assertContains('whoami', array_column(json_decode($raw, true)['result']['tools'], 'name'));
+    }
+
     public function testEveryResponseIsJson(): void
     {
-        $this->assertNotEmpty(self::$jsonResponses);
-        foreach (self::$jsonResponses as $response) {
+        $call = ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => 'whoami', 'arguments' => (object) []]];
+        $responses = [
+            $this->mcp(self::PING, [], ''),
+            $this->mcp(self::PING, [], 'not-a-real-key'),
+            $this->mcp(self::PING, ['Origin' => 'https://evil.example.com']),
+            $this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => ['protocolVersion' => '2025-06-18']]),
+            $this->mcp($call, ['MCP-Protocol-Version' => '2026-07-28', 'Mcp-Method' => 'tools/call', 'Mcp-Name' => 'whoami']),
+        ];
+
+        foreach ($responses as $response) {
             $this->assertNotNull($response['body']);
             $this->assertStringStartsWith('application/json', $response['headers']['content-type'] ?? '');
         }
