@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DoliMcp\Tools;
 
+use DoliMcp\Mcp\ToolError;
 use DoliMcp\Support\Compactor;
 
 /** The Dolibarr object types handled by the generic tools: REST path and status labels. */
@@ -30,6 +31,16 @@ final class ObjectTypes
 
     // Dolibarr objects expose their status under one of these names, depending on the class.
     private const STATUS_FIELDS = ['status', 'statut', 'fk_statut'];
+
+    /** The id a REST POST answers with: a positive integer, possibly as a numeric string. */
+    public static function createdId(string $type, mixed $answer): int
+    {
+        if ((is_int($answer) || is_string($answer)) && ctype_digit((string) $answer) && (int) $answer > 0) {
+            return (int) $answer;
+        }
+
+        throw new ToolError("Dolibarr did not return the new $type id: " . mb_substr(json_encode($answer) ?: '', 0, 200));
+    }
 
     public static function statusLabel(string $type, int $status): ?string
     {

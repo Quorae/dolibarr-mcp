@@ -73,7 +73,7 @@ final class ObjectTools
             static function (array $a) use ($context, $path): ToolResult {
                 $newId = $context->rest->request('POST', $path($a), [], (array) $a['fields']);
 
-                return ToolResult::ok(ObjectTypes::present((string) $a['type'], $context->rest->request('GET', $path($a) . '/' . (int) $newId)));
+                return ToolResult::ok(ObjectTypes::present((string) $a['type'], $context->rest->request('GET', $path($a) . '/' . ObjectTypes::createdId((string) $a['type'], $newId))));
             },
             true,
         ));
