@@ -1,0 +1,70 @@
+name: dolimcp-test
+
+x-dolibarr-image: &dolibarr-image dolibarr/dolibarr:24.0.2-php8.5
+
+services:
+  dolibarr-app:
+    image: *dolibarr-image
+    environment:
+      DOLI_DB_TYPE: mysqli
+      DOLI_DB_HOST: dolibarr-db
+      DOLI_DB_NAME: dolibarr
+      DOLI_DB_USER: dolibarr
+      DOLI_DB_PASSWORD: dolibarr-test-pass
+      DOLI_URL_ROOT: http://dolibarr-app
+      DOLI_ADMIN_LOGIN: admin
+      DOLI_ADMIN_PASSWORD: admin-test-pass
+      DOLI_COMPANY_COUNTRYCODE: FR
+      DOLI_ENABLE_MODULES: Societe,Propale,Facture,Banque,Product,Service,Projet,Agenda,ECM,Api,Cron
+      DOLI_INSTALL_AUTO: 1
+      DOLI_CRON: 0
+      PHP_INI_DATE_TIMEZONE: Europe/Paris
+    volumes:
+      - ../dolimcp:/var/www/html/custom/dolimcp:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1/"]
+      start_period: 300s
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      dolibarr-db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  dolibarr-db:
+    image: mariadb:11.4.13
+    environment:
+      MARIADB_DATABASE: dolibarr
+      MARIADB_USER: dolibarr
+      MARIADB_PASSWORD: dolibarr-test-pass
+      MARIADB_ROOT_PASSWORD: root-test-pass
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 60s
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  mailpit:
+    image: axllent/mailpit:v1.27.4
+
+  tests:
+    image: *dolibarr-image
+    profiles: ["run"]
+    entrypoint: ["php"]
+    working_dir: /repo
+    volumes:
+      - ..:/repo
+    environment:
+      MCP_URL: http://dolibarr-app/custom/dolimcp/mcp.php
+      REST_URL: http://dolibarr-app/api/index.php
+      MAILPIT_URL: http://mailpit:8025
+      DB_HOST: dolibarr-db
+      DB_NAME: dolibarr
+      DB_USER: dolibarr
+      DB_PASSWORD: dolibarr-test-pass
+    depends_on:
+      dolibarr-app:
+        condition: service_healthy

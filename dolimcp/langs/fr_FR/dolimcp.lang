@@ -1,0 +1,5 @@
+# Dolibarr MCP language file - fr_FR
+Module591300Name = Dolibarr MCP
+Module591300Desc = Expose un point d'accès Model Context Protocol (MCP) au-dessus de l'API REST de Dolibarr
+DoliMcpDescription = Expose un point d'accès Model Context Protocol (MCP)
+DoliMcpSetup = Configuration de Dolibarr MCP

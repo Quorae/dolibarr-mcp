@@ -1,0 +1,5 @@
+# Dolibarr MCP language file - en_US
+Module591300Name = Dolibarr MCP
+Module591300Desc = Serves a Model Context Protocol (MCP) endpoint on top of the Dolibarr REST API
+DoliMcpDescription = Serves a Model Context Protocol (MCP) endpoint
+DoliMcpSetup = Dolibarr MCP setup

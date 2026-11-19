@@ -1,0 +1,6 @@
+meta:
+  id: dolibarr-mcp
+  name: Dolibarr MCP
+language: en
+testing:
+  own_harness: true

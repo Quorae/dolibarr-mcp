@@ -1,0 +1,20 @@
+{
+    "name": "dolibarr-mcp/dolimcp",
+    "description": "Dolibarr module serving a Model Context Protocol endpoint",
+    "license": "GPL-3.0-or-later",
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^13.0"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "DoliMcp\\Tests\\Unit\\": "tests/unit/",
+            "DoliMcp\\Tests\\Integration\\": "tests/integration/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
