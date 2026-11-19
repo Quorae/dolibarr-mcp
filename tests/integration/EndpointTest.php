@@ -1,0 +1,92 @@
+<?php
+
+declare(strict_types=1);
+
+namespace DoliMcp\Tests\Integration;
+
+final class EndpointTest extends McpTestCase
+{
+    /** @var list<array{status: int, headers: array<string, string>, body: ?array}> */
+    private static array $jsonResponses = [];
+
+    private const PING = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'];
+
+    private function track(array $response): array
+    {
+        self::$jsonResponses[] = $response;
+
+        return $response;
+    }
+
+    public function testMissingKeyGets401Json(): void
+    {
+        $response = $this->track($this->mcp(self::PING, [], ''));
+
+        $this->assertSame(401, $response['status']);
+        $this->assertSame(-32001, $response['body']['error']['code']);
+        $this->assertNotSame('', $response['body']['error']['message']);
+    }
+
+    public function testWrongKeyGets401Json(): void
+    {
+        $response = $this->track($this->mcp(self::PING, [], 'not-a-real-key'));
+
+        $this->assertSame(401, $response['status']);
+        $this->assertSame(-32001, $response['body']['error']['code']);
+    }
+
+    public function testForeignOriginGets403(): void
+    {
+        $response = $this->track($this->mcp(self::PING, ['Origin' => 'https://evil.example.com']));
+
+        $this->assertSame(403, $response['status']);
+    }
+
+    public function testGetGets405(): void
+    {
+        $context = stream_context_create(['http' => [
+            'method' => 'GET',
+            'header' => 'DOLAPIKEY: ' . self::apiKey(),
+            'ignore_errors' => true,
+        ]]);
+        @file_get_contents((string) getenv('MCP_URL'), false, $context);
+
+        $this->assertStringContainsString(' 405', http_get_last_response_headers()[0]);
+    }
+
+    public function testLegacyClientCanInitializeListAndCall(): void
+    {
+        $init = $this->track($this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => ['protocolVersion' => '2025-06-18']]));
+        $this->assertSame(200, $init['status']);
+        $this->assertSame('2025-06-18', $init['body']['result']['protocolVersion']);
+
+        $list = $this->track($this->mcp(self::PING));
+        $names = array_column($list['body']['result']['tools'], 'name');
+        $this->assertContains('whoami', $names);
+
+        $call = $this->track($this->mcp(['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => 'whoami', 'arguments' => (object) []]]));
+        $this->assertSame(200, $call['status']);
+        $this->assertFalse($call['body']['result']['isError'] ?? false);
+    }
+
+    public function testModernClientCanDiscoverAndCallWhoami(): void
+    {
+        $result = $this->callTool('whoami');
+
+        $this->assertFalse($result['isError']);
+        $this->assertSame('admin', $result['data']['login']);
+        $this->assertTrue($result['data']['admin']);
+        $this->assertContains('dolimcp', $result['data']['enabled_modules']);
+        $this->assertArrayHasKey('dolibarr_version', $result['data']);
+        $this->assertArrayHasKey('entity', $result['data']);
+    }
+
+    public function testEveryResponseIsJson(): void
+    {
+        $this->assertNotEmpty(self::$jsonResponses);
+        foreach (self::$jsonResponses as $response) {
+            $this->assertNotNull($response['body']);
+            $this->assertStringStartsWith('application/json', $response['headers']['content-type'] ?? '');
+        }
+    }
+}
